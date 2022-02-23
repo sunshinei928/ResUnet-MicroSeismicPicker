@@ -61,13 +61,13 @@ def init_dataset():
     print(f'total events in csv file: {len(df)}')
     # filterering the dataframe
     #df = df[(df.trace_category == configs.trace_category) & (df.source_magnitude < configs.source_magnitude_lt) & (df.p_arrival_sample > 400) & (list(map(snr_convert,df['snr_db'])))]
-    df = df[(df.trace_category == configs.trace_category) & (df.source_magnitude < configs.source_magnitude_lt) & (df.p_arrival_sample > 400)]
+    df = df[(df.trace_category == configs.trace_category) & (df.source_magnitude < configs.source_magnitude_lt) & (df.p_arrival_sample > 400) & (df.s_arrival_sample - df.p_arrival_sample < 1000)]
     print(f'total events selected: {len(df)}')
 
     ev_list = df['trace_name'].to_list()
-    train_set, val_set = random_split(
+    train_set, val_set, _ = random_split(
                 dataset=ev_list,
-                lengths=[ev_list.__len__()-1500,1500],
+                lengths=[configs.data_for_train,configs.data_for_val,ev_list.__len__()-configs.data_for_train-configs.data_for_val],
                 generator=torch.Generator().manual_seed(12))
 
     # 读取噪声数据
@@ -99,14 +99,15 @@ class STEAD_Dataset(Dataset):
         random_start = random.randint(9,int(dataset.attrs['p_arrival_sample']))
         p_start = int(dataset.attrs['p_arrival_sample']) - random_start
         s_start = int(dataset.attrs['s_arrival_sample']) - random_start
-        coda_end = int(dataset.attrs['coda_end_sample']) - random_start
-        stream = make_stream(random_start,random_start+3000,dataset)
+        #coda_end = int(dataset.attrs['coda_end_sample']) - random_start
+        coda_end = 0    #not needed
+        stream = make_stream(random_start,random_start+1600,dataset)
         stream = torch.Tensor(stream)
         stream[0] = stream[0] / (stream[0].max() - stream[0].min() + 0.000001)
         stream[1] = stream[1] / (stream[1].max() - stream[1].min() + 0.000001)
         stream[2] = stream[2] / (stream[2].max() - stream[2].min() + 0.000001)
-        label_p = self.GaussianLabel(3000,p_start)
-        label_s = self.GaussianLabel(3000,s_start)
+        label_p = self.GaussianLabel(1600,p_start)
+        label_s = self.GaussianLabel(1600,s_start)
         return stream,label_p,label_s,p_start,s_start,coda_end
 
     def __len__(self):

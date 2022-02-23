@@ -7,7 +7,7 @@ from codes import configs
 class _Res1D_convsizefixed_v1(nn.Module):
     def __init__(self,in_channels, out_channels, convsize):
         super().__init__()
-        self.overlapTile = nn.ReflectionPad1d(int(convsize/2))
+        self.overlapTile = nn.ReflectionPad1d(int(convsize/2))  #对称填充
         # bn layers
         self.BN_1 = nn.BatchNorm1d(in_channels)
         self.BN_2 = nn.BatchNorm1d(out_channels)
@@ -20,8 +20,6 @@ class _Res1D_convsizefixed_v1(nn.Module):
             self.bottleneck_conv = nn.Conv1d(in_channels,out_channels,1,1)
         else:
             self.bottleneck_conv = None
-
-    def weight_init(self):
 
     
     def forward(self,x):
@@ -39,13 +37,50 @@ class _Res1D_convsizefixed_v1(nn.Module):
         
         return output + X
 
-class _QuakePicker_v4(nn.Module):
+class ResUnet(nn.Module):
     def __init__(self):
         super().__init__()
         self.res_down_1 = _Res1D_convsizefixed_v1(3,6,5)
         self.res_down_2 = _Res1D_convsizefixed_v1(6,12,5)
         self.res_down_3 = _Res1D_convsizefixed_v1(12,24,5)
         self.res_retain = _Res1D_convsizefixed_v1(24,24,5)  # 准备用注意力替换
+        #self.multihead_att = nn.MultiheadAttention()
+        self.res_up_1 = _Res1D_convsizefixed_v1(48,12,5)
+        self.res_up_2 = _Res1D_convsizefixed_v1(24,6,5)
+        self.res_up_3 = _Res1D_convsizefixed_v1(12,3,5)
+        self.res_output = _Res1D_convsizefixed_v1(6,3,5)
+        self.upsample = torch.nn.Upsample(scale_factor=4, mode='linear')
+
+    def forward(self,x):
+        Intermediate1 = x
+        output = torch.relu(self.res_down_1(x))         # 6*1600
+        output = torch.max_pool1d(output,4,4)           # 6*800
+        Intermediate2 = output
+        output = torch.relu(self.res_down_2(output))    # 12*800
+        output = torch.max_pool1d(output,4,4)           # 12*200
+        Intermediate3 = output
+        output = torch.relu(self.res_down_3(output))    # 24*200
+        output = torch.max_pool1d(output,4,4)           # 24*50
+        Intermediate4 = output
+        print(output.shape)
+        output = torch.relu(self.res_retain(output))    # 24*50
+        output = torch.relu(self.res_up_1(torch.cat((Intermediate4,output),1)))# 12*50
+        output = self.upsample(output)                  # 12*200
+        output = torch.relu(self.res_up_2(torch.cat((Intermediate3,output),1)))# 6*200
+        output = self.upsample(output)                  # 6*800
+        output = torch.relu(self.res_up_3(torch.cat((Intermediate2,output),1)))# 3*800
+        output = self.upsample(output)                  # 3*1600
+        output = torch.sigmoid(self.res_output(torch.cat((Intermediate1,output),1)))# 3*1600
+        return output
+
+class _QuakePicker_v4(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.res_down_1 = _Res1D_convsizefixed_v1(3,6,5)
+        self.res_down_2 = _Res1D_convsizefixed_v1(6,12,5)
+        self.res_down_3 = _Res1D_convsizefixed_v1(12,24,5)
+        # self.res_retain = _Res1D_convsizefixed_v1(24,24,5)  # 准备用注意力替换
+        self.multihead_att = nn.MultiheadAttention()
         self.res_up_1 = _Res1D_convsizefixed_v1(48,12,5)
         self.res_up_2 = _Res1D_convsizefixed_v1(24,6,5)
         self.res_up_3 = _Res1D_convsizefixed_v1(12,3,5)

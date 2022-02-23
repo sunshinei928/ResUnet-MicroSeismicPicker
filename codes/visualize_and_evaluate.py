@@ -121,6 +121,18 @@ class Evaluator():
                     self.S_maxprob[key] = -1  # reset maxprob
                     self.S_maxprob_index[key] = -1 # reset index    
 
+    '''
+    多线程 将其他对象的评估结果加过来
+    '''
+    def merge_evaluator(self,evaluator):
+        for key in list(self.thresholds.keys()):
+            self.TP_p[key] += evaluator.TP_p[key]
+            self.FP_p[key] += evaluator.FP_p[key]
+            self.FN_p[key] += evaluator.FN_p[key]
+            self.TP_s[key] += evaluator.TP_s[key]
+            self.FP_s[key] += evaluator.FP_s[key]
+            self.FN_s[key] += evaluator.FN_s[key]
+
     def get_result_print(self):
         e = 10e-7
         #   返回评估结果
