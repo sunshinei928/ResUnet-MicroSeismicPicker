@@ -2,6 +2,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn import LSTM
 from codes import configs
 
 class _Res1D_convsizefixed_v1(nn.Module):
@@ -62,7 +63,6 @@ class ResUnet(nn.Module):
         output = torch.relu(self.res_down_3(output))    # 24*200
         output = torch.max_pool1d(output,4,4)           # 24*50
         Intermediate4 = output
-        print(output.shape)
         output = torch.relu(self.res_retain(output))    # 24*50
         output = torch.relu(self.res_up_1(torch.cat((Intermediate4,output),1)))# 12*50
         output = self.upsample(output)                  # 12*200
@@ -72,6 +72,48 @@ class ResUnet(nn.Module):
         output = self.upsample(output)                  # 3*1600
         output = torch.sigmoid(self.res_output(torch.cat((Intermediate1,output),1)))# 3*1600
         return output
+
+
+class ResUnet_LSTM(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.res_down_1 = _Res1D_convsizefixed_v1(3,6,5)
+        self.res_down_2 = _Res1D_convsizefixed_v1(6,12,5)
+        self.res_down_3 = _Res1D_convsizefixed_v1(12,24,5)
+        # self.res_retain = _Res1D_convsizefixed_v1(24,24,5)  # 准备用注意力替换
+        self.h_0 = torch.zeros(2*1, configs.BATCH_SIZE, 12).to(configs.device)#direct*layer,batch,hidden_size
+        self.c_0 = torch.zeros(2*1, configs.BATCH_SIZE, 12).to(configs.device)
+        self.bi_lstm = LSTM(input_size=24, hidden_size=12, num_layers=1, batch_first=False, bidirectional = True)
+        self.res_up_1 = _Res1D_convsizefixed_v1(48,12,5)
+        self.res_up_2 = _Res1D_convsizefixed_v1(24,6,5)
+        self.res_up_3 = _Res1D_convsizefixed_v1(12,3,5)
+        self.res_output = _Res1D_convsizefixed_v1(6,3,5)
+        self.upsample4 = torch.nn.Upsample(scale_factor=4, mode='linear')
+        self.upsample2 = torch.nn.Upsample(scale_factor=2, mode='linear')
+
+    def forward(self,x):
+        Intermediate1 = x
+        output = torch.relu(self.res_down_1(x))         # 6*1600
+        output = torch.max_pool1d(output,2,2)           # 6*800
+        Intermediate2 = output
+        output = torch.relu(self.res_down_2(output))    # 12*800
+        output = torch.max_pool1d(output,4,4)           # 12*200
+        Intermediate3 = output
+        output = torch.relu(self.res_down_3(output))    # 24*200
+        output = torch.max_pool1d(output,4,4)           # 24*50
+        Intermediate4 = output
+        output = output.permute(2,0,1) # b,24,50=>50,b,24
+        output,_ = self.bi_lstm(output,(self.h_0,self.c_0))# 24*50
+        output = output.permute(1,2,0)
+        #output = torch.relu(self.res_retain(output))    # 24*50
+        output = torch.relu(self.res_up_1(torch.cat((Intermediate4,output),1)))# 12*50
+        output = self.upsample4(output)                  # 12*200
+        output = torch.relu(self.res_up_2(torch.cat((Intermediate3,output),1)))# 6*200
+        output = self.upsample4(output)                  # 6*800
+        output = torch.relu(self.res_up_3(torch.cat((Intermediate2,output),1)))# 3*800
+        output = self.upsample2(output)                  # 3*1600
+        output = torch.sigmoid(self.res_output(torch.cat((Intermediate1,output),1)))# 3*1600
+        return output    
 
 class _QuakePicker_v4(nn.Module):
     def __init__(self):
