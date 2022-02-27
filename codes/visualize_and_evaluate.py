@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import torch
 import numpy as np
 import pandas as pd
+from codes.model import ResUnet_LSTM
 from pandas.core.indexes.base import Index
 from codes import configs
 from copy import deepcopy
@@ -328,6 +329,31 @@ def showRawWave(wave,p_start,s_start,coda_end):
 
     plt.show()
 
+def showProb(wave,p_start,s_start,coda_end):
+    fig = plt.figure()
+
+    fig_E = fig.add_subplot(311)
+    plt.title("E")
+    plt.plot(wave[0],color='#336699')
+    plt.rcParams["figure.figsize"] = (15, 10)
+    ymin, ymax = fig_E.get_ylim()
+    pl = plt.vlines(p_start,ymin,ymax,color='b', linewidth=2, label='P-arrival')
+    sl = plt.vlines(s_start,ymin,ymax,color='#993399', linewidth=2, label='S-arrival')
+    el = plt.vlines(coda_end,ymin,ymax,color='#663300', linewidth=2, label='coda_end')
+    plt.legend(handles=[pl, sl, el], loc = 'upper right', borderaxespad=0., prop={'weight':'bold'})#在轴上放置图例  
+
+    fig_N = fig.add_subplot(312)
+    plt.title("N")
+    plt.plot(wave[1],color='#336699')
+    plt.rcParams["figure.figsize"] = (15, 10)
+    ymin, ymax = fig_N.get_ylim()
+    pl = plt.vlines(p_start,ymin,ymax,color='b', linewidth=2, label='P-arrival')
+    sl = plt.vlines(s_start,ymin,ymax,color='#993399', linewidth=2, label='S-arrival')
+    el = plt.vlines(coda_end,ymin,ymax,color='#663300', linewidth=2, label='coda_end')
+    plt.legend(handles=[pl, sl, el], loc = 'upper right', borderaxespad=0., prop={'weight':'bold'})#在轴上放置图例  
+
+    plt.show()
+
 #   。。。
 def showDeltaWave(wave,p_start,s_start,coda_end):
     delta0 = torch.Tensor([wave[0,i+1]-wave[0,i] for i in range(3001)]).unsqueeze(0)
@@ -436,7 +462,10 @@ def th_evaluator(evaluator,time_bias,queue,model_path, info):
 
 def evaluate(model_path, info, eval_loader, time_bias, th_num):
     q = Queue(th_num + 1)
-    model_eval = torch.load(model_path).eval().to(configs.device)
+    model = ResUnet_LSTM(False)
+    model.load_state_dict(torch.load(model_path))
+    model.eval().to(configs.device)
+
     evaluator_list = []
     thread_list = []
     for i in range(th_num):

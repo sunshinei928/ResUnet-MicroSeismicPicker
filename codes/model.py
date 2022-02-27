@@ -1,4 +1,5 @@
 
+from re import X
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -38,82 +39,196 @@ class _Res1D_convsizefixed_v1(nn.Module):
         
         return output + X
 
-class ResUnet(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.res_down_1 = _Res1D_convsizefixed_v1(3,6,5)
-        self.res_down_2 = _Res1D_convsizefixed_v1(6,12,5)
-        self.res_down_3 = _Res1D_convsizefixed_v1(12,24,5)
-        self.res_retain = _Res1D_convsizefixed_v1(24,24,5)  # 准备用注意力替换
-        #self.multihead_att = nn.MultiheadAttention()
-        self.res_up_1 = _Res1D_convsizefixed_v1(48,12,5)
-        self.res_up_2 = _Res1D_convsizefixed_v1(24,6,5)
-        self.res_up_3 = _Res1D_convsizefixed_v1(12,3,5)
-        self.res_output = _Res1D_convsizefixed_v1(6,3,5)
-        self.upsample = torch.nn.Upsample(scale_factor=4, mode='linear')
-
-    def forward(self,x):
-        Intermediate1 = x
-        output = torch.relu(self.res_down_1(x))         # 6*1600
-        output = torch.max_pool1d(output,4,4)           # 6*800
-        Intermediate2 = output
-        output = torch.relu(self.res_down_2(output))    # 12*800
-        output = torch.max_pool1d(output,4,4)           # 12*200
-        Intermediate3 = output
-        output = torch.relu(self.res_down_3(output))    # 24*200
-        output = torch.max_pool1d(output,4,4)           # 24*50
-        Intermediate4 = output
-        output = torch.relu(self.res_retain(output))    # 24*50
-        output = torch.relu(self.res_up_1(torch.cat((Intermediate4,output),1)))# 12*50
-        output = self.upsample(output)                  # 12*200
-        output = torch.relu(self.res_up_2(torch.cat((Intermediate3,output),1)))# 6*200
-        output = self.upsample(output)                  # 6*800
-        output = torch.relu(self.res_up_3(torch.cat((Intermediate2,output),1)))# 3*800
-        output = self.upsample(output)                  # 3*1600
-        output = torch.sigmoid(self.res_output(torch.cat((Intermediate1,output),1)))# 3*1600
-        return output
-
 
 class ResUnet_LSTM(nn.Module):
-    def __init__(self):
+    def __init__(self,train_mode):
         super().__init__()
+        self.train_mode = train_mode
         self.res_down_1 = _Res1D_convsizefixed_v1(3,6,5)
         self.res_down_2 = _Res1D_convsizefixed_v1(6,12,5)
         self.res_down_3 = _Res1D_convsizefixed_v1(12,24,5)
         # self.res_retain = _Res1D_convsizefixed_v1(24,24,5)  # 准备用注意力替换
-        self.h_0 = torch.zeros(2*1, configs.BATCH_SIZE, 12).to(configs.device)#direct*layer,batch,hidden_size
-        self.c_0 = torch.zeros(2*1, configs.BATCH_SIZE, 12).to(configs.device)
+        if self.train_mode == True:
+            self.h_0 = torch.zeros(2*1, configs.BATCH_SIZE, 12).to(configs.device)#direct*layer,batch,hidden_size
+            self.c_0 = torch.zeros(2*1, configs.BATCH_SIZE, 12).to(configs.device)
+        else:
+            self.h_0 = torch.zeros(1*2, 1, 12).to(configs.device)#direct*layer,batch,hidden_size
+            self.c_0 = torch.zeros(1*2, 1, 12).to(configs.device)
         self.bi_lstm = LSTM(input_size=24, hidden_size=12, num_layers=1, batch_first=False, bidirectional = True)
-        self.res_up_1 = _Res1D_convsizefixed_v1(48,12,5)
-        self.res_up_2 = _Res1D_convsizefixed_v1(24,6,5)
-        self.res_up_3 = _Res1D_convsizefixed_v1(12,3,5)
-        self.res_output = _Res1D_convsizefixed_v1(6,3,5)
+        self.leakyRelu = nn.LeakyReLU(0.1)
+        self.res_up_1p = _Res1D_convsizefixed_v1(48,12,5)
+        self.res_up_1s = _Res1D_convsizefixed_v1(48,12,5)
+        self.res_up_2p = _Res1D_convsizefixed_v1(24,6,5)
+        self.res_up_2s = _Res1D_convsizefixed_v1(24,6,5)
+        self.res_up_3p = _Res1D_convsizefixed_v1(12,3,5)
+        self.res_up_3s = _Res1D_convsizefixed_v1(12,3,5)
+        self.res_dense_p = _Res1D_convsizefixed_v1(6,3,5)
+        self.res_dense_s = _Res1D_convsizefixed_v1(6,3,5)
+        self.res_output_p = _Res1D_convsizefixed_v1(3,1,1)
+        self.res_output_s = _Res1D_convsizefixed_v1(3,1,1)
         self.upsample4 = torch.nn.Upsample(scale_factor=4, mode='linear')
         self.upsample2 = torch.nn.Upsample(scale_factor=2, mode='linear')
 
-    def forward(self,x):
-        Intermediate1 = x
+    def encode(self,x):
+        self.Intermediate1 = x
         output = torch.relu(self.res_down_1(x))         # 6*1600
         output = torch.max_pool1d(output,2,2)           # 6*800
-        Intermediate2 = output
+        self.Intermediate2 = output
         output = torch.relu(self.res_down_2(output))    # 12*800
         output = torch.max_pool1d(output,4,4)           # 12*200
-        Intermediate3 = output
+        self.Intermediate3 = output
         output = torch.relu(self.res_down_3(output))    # 24*200
         output = torch.max_pool1d(output,4,4)           # 24*50
-        Intermediate4 = output
-        output = output.permute(2,0,1) # b,24,50=>50,b,24
+        self.Intermediate4 = output
+        return output
+
+    def decode_p(self,x):
+        output = self.leakyRelu(self.res_up_1p(torch.cat((self.Intermediate4,x),1)))
+        output = self.upsample4(output)
+        output = self.leakyRelu(self.res_up_2p(torch.cat((self.Intermediate3,output),1)))
+        output = self.upsample4(output)
+        output = self.leakyRelu(self.res_up_3p(torch.cat((self.Intermediate2,output),1)))
+        output = self.upsample2(output)
+        output = self.leakyRelu(self.res_dense_p(torch.cat((self.Intermediate1,output),1)))
+        output = torch.sigmoid(self.res_output_p(output))
+        return output
+
+    def decode_s(self,x):
+        # 重置h c
+        if self.train_mode == True:
+            self.h_0 = torch.zeros(2*1, configs.BATCH_SIZE, 12).to(configs.device)#direct*layer,batch,hidden_size
+            self.c_0 = torch.zeros(2*1, configs.BATCH_SIZE, 12).to(configs.device)
+        else:
+            self.h_0 = torch.zeros(1*2, 1, 12).to(configs.device)#direct*layer,batch,hidden_size
+            self.c_0 = torch.zeros(1*2, 1, 12).to(configs.device)
+        output = x.permute(2,0,1) # b,24,50=>50,b,24
         output,_ = self.bi_lstm(output,(self.h_0,self.c_0))# 24*50
         output = output.permute(1,2,0)
-        #output = torch.relu(self.res_retain(output))    # 24*50
-        output = torch.relu(self.res_up_1(torch.cat((Intermediate4,output),1)))# 12*50
-        output = self.upsample4(output)                  # 12*200
-        output = torch.relu(self.res_up_2(torch.cat((Intermediate3,output),1)))# 6*200
-        output = self.upsample4(output)                  # 6*800
-        output = torch.relu(self.res_up_3(torch.cat((Intermediate2,output),1)))# 3*800
-        output = self.upsample2(output)                  # 3*1600
-        output = torch.sigmoid(self.res_output(torch.cat((Intermediate1,output),1)))# 3*1600
-        return output    
+        output = self.leakyRelu(self.res_up_1s(torch.cat((self.Intermediate4,x),1)))
+        output = self.upsample4(output)
+        output = self.leakyRelu(self.res_up_2s(torch.cat((self.Intermediate3,output),1)))
+        output = self.upsample4(output)
+        output = self.leakyRelu(self.res_up_3s(torch.cat((self.Intermediate2,output),1)))
+        output = self.upsample2(output)
+        output = self.leakyRelu(self.res_dense_s(torch.cat((self.Intermediate1,output),1)))
+        output = torch.sigmoid(self.res_output_s(output))
+        return output
+
+    def forward(self,x):
+        vec = self.encode(x)
+        output_p = self.decode_p(vec)
+        output_s = self.decode_s(vec)
+        output = torch.cat((output_p,output_s),1)
+        return output
+
+
+class ResUnet_LSTM_L(nn.Module):
+    def __init__(self,train_mode):
+        super().__init__()
+        self.train_mode = train_mode
+        self.res_down_1 = _Res1D_convsizefixed_v1(3,6,5)
+        self.res_down_2 = _Res1D_convsizefixed_v1(6,9,5)
+        self.res_down_3 = _Res1D_convsizefixed_v1(9,12,5)
+        self.res_down_4 = _Res1D_convsizefixed_v1(12,18,3)
+        self.res_down_5 = _Res1D_convsizefixed_v1(18,24,3)
+        if self.train_mode == True:
+            self.h_0 = torch.zeros(2*1, configs.BATCH_SIZE, 12).to(configs.device)#direct*layer,batch,hidden_size
+            self.c_0 = torch.zeros(2*1, configs.BATCH_SIZE, 12).to(configs.device)
+        else:
+            self.h_0 = torch.zeros(1*2, 1, 12).to(configs.device)#direct*layer,batch,hidden_size
+            self.c_0 = torch.zeros(1*2, 1, 12).to(configs.device)
+        self.bi_lstm = LSTM(input_size=24, hidden_size=12, num_layers=1, batch_first=False, bidirectional = True)
+        self.leakyRelu = nn.LeakyReLU(0.1)
+        self.res_up_1p = _Res1D_convsizefixed_v1(48,18,3)
+        self.res_up_1s = _Res1D_convsizefixed_v1(48,18,3)
+
+        self.res_up_2p = _Res1D_convsizefixed_v1(36,12,3)
+        self.res_up_2s = _Res1D_convsizefixed_v1(36,12,3)
+
+        self.res_up_3p = _Res1D_convsizefixed_v1(24,9,5)
+        self.res_up_3s = _Res1D_convsizefixed_v1(24,9,5)
+
+        self.res_up_4p = _Res1D_convsizefixed_v1(18,6,5)
+        self.res_up_4s = _Res1D_convsizefixed_v1(18,6,5)
+
+        self.res_up_5p = _Res1D_convsizefixed_v1(12,3,5)
+        self.res_up_5s = _Res1D_convsizefixed_v1(12,3,5)        
+
+        self.res_dense_p = _Res1D_convsizefixed_v1(6,3,3)
+        self.res_dense_s = _Res1D_convsizefixed_v1(6,3,3)
+        self.res_output_p = _Res1D_convsizefixed_v1(3,1,1)
+        self.res_output_s = _Res1D_convsizefixed_v1(3,1,1)
+
+        self.upsample2 = torch.nn.Upsample(scale_factor=2, mode='linear')
+
+    def encode(self,x):
+        self.Intermediate1 = x
+        output = self.leakyRelu(self.res_down_1(x))         # 6*1600
+        output = torch.max_pool1d(output,2,2)               # 6*800
+        self.Intermediate2 = output
+        output = self.leakyRelu(self.res_down_2(output))    # 9*800
+        output = torch.max_pool1d(output,2,2)               # 9*400
+        self.Intermediate3 = output
+        output = self.leakyRelu(self.res_down_3(output))    # 12*400
+        output = torch.max_pool1d(output,2,2)               # 12*200
+        self.Intermediate4 = output
+        output = self.leakyRelu(self.res_down_4(output))    # 18*200
+        output = torch.max_pool1d(output,2,2)               # 18*100
+        self.Intermediate5 = output
+        output = self.leakyRelu(self.res_down_5(output))    # 24*100
+        output = torch.max_pool1d(output,2,2)               # 24*50
+        self.Intermediate6 = output
+        return output
+
+    def decode_p(self,x):
+        output = self.leakyRelu(self.res_up_1p(torch.cat((self.Intermediate6,x),1)))
+        output = self.upsample2(output)
+        output = self.leakyRelu(self.res_up_2p(torch.cat((self.Intermediate5,output),1)))
+        output = self.upsample2(output)
+        output = self.leakyRelu(self.res_up_3p(torch.cat((self.Intermediate4,output),1)))
+        output = self.upsample2(output)
+        output = self.leakyRelu(self.res_up_4p(torch.cat((self.Intermediate3,output),1)))
+        output = self.upsample2(output)
+        output = self.leakyRelu(self.res_up_5p(torch.cat((self.Intermediate2,output),1)))
+        output = self.upsample2(output)
+        output = self.leakyRelu(self.res_dense_p(torch.cat((self.Intermediate1,output),1)))              
+        output = torch.sigmoid(self.res_output_p(output))
+        return output
+
+    def decode_s(self,x):
+        # 重置h c
+        if self.train_mode == True:
+            self.h_0 = torch.zeros(2*1, configs.BATCH_SIZE, 12).to(configs.device)#direct*layer,batch,hidden_size
+            self.c_0 = torch.zeros(2*1, configs.BATCH_SIZE, 12).to(configs.device)
+        else:
+            self.h_0 = torch.zeros(1*2, 1, 12).to(configs.device)#direct*layer,batch,hidden_size
+            self.c_0 = torch.zeros(1*2, 1, 12).to(configs.device)
+        output = x.permute(2,0,1) # b,24,50=>50,b,24
+        output,_ = self.bi_lstm(output,(self.h_0,self.c_0))# 24*50
+        output = output.permute(1,2,0)
+
+        output = self.leakyRelu(self.res_up_1s(torch.cat((self.Intermediate6,x),1)))
+        output = self.upsample2(output)
+        output = self.leakyRelu(self.res_up_2s(torch.cat((self.Intermediate5,output),1)))
+        output = self.upsample2(output)
+        output = self.leakyRelu(self.res_up_3s(torch.cat((self.Intermediate4,output),1)))
+        output = self.upsample2(output)
+        output = self.leakyRelu(self.res_up_4s(torch.cat((self.Intermediate3,output),1)))
+        output = self.upsample2(output)
+        output = self.leakyRelu(self.res_up_5s(torch.cat((self.Intermediate2,output),1)))
+        output = self.upsample2(output)
+        output = self.leakyRelu(self.res_dense_s(torch.cat((self.Intermediate1,output),1)))              
+        output = torch.sigmoid(self.res_output_s(output))
+        return output
+
+    def forward(self,x):
+        vec = self.encode(x)
+        output_p = self.decode_p(vec)
+        output_s = self.decode_s(vec)
+        output = torch.cat((output_p,output_s),1)
+        return output
+
+
 
 class _QuakePicker_v4(nn.Module):
     def __init__(self):
