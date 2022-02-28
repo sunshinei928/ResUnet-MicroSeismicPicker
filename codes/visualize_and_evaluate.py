@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import torch
 import numpy as np
 import pandas as pd
-from codes.model import ResUnet_LSTM
+from codes.model import ResUnet_LSTM, ResUnet_LSTM_L
 from pandas.core.indexes.base import Index
 from codes import configs
 from copy import deepcopy
@@ -462,7 +462,7 @@ def th_evaluator(evaluator,time_bias,queue,model_path, info):
 
 def evaluate(model_path, info, eval_loader, time_bias, th_num):
     q = Queue(th_num + 1)
-    model = ResUnet_LSTM(False)
+    model = ResUnet_LSTM_L(False)
     model.load_state_dict(torch.load(model_path))
     model.eval().to(configs.device)
 
@@ -480,7 +480,7 @@ def evaluate(model_path, info, eval_loader, time_bias, th_num):
     计算其与真实值的差距，若偏差小于time_bias则为TP，否则为FP。
     若没有任何有效拾取符合条件，则记录一次FN
     '''
-    th_feeder = threading.Thread(target=th_calculator, args=(eval_loader,model_eval,q,th_num))
+    th_feeder = threading.Thread(target=th_calculator, args=(eval_loader,model,q,th_num))
     th_feeder.start()
 
     for i in range(th_num):

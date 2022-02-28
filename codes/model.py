@@ -229,6 +229,94 @@ class ResUnet_LSTM_L(nn.Module):
         return output
 
 
+class ResUnet_LSTM(nn.Module):
+    def __init__(self,train_mode=True):
+        super().__init__()
+        self.res_down_1 = _Res1D_convsizefixed_v1(3,6,5)
+        self.res_down_2 = _Res1D_convsizefixed_v1(6,9,5)
+        self.res_down_3 = _Res1D_convsizefixed_v1(9,12,5)
+        self.res_down_4 = _Res1D_convsizefixed_v1(12,18,3)
+        self.res_down_5 = _Res1D_convsizefixed_v1(18,24,3)
+        self.leakyRelu = nn.LeakyReLU(0.1)
+        self.res_up_1p = _Res1D_convsizefixed_v1(48,18,3)
+        self.res_up_1s = _Res1D_convsizefixed_v1(48,18,3)
+
+        self.res_up_2p = _Res1D_convsizefixed_v1(36,12,3)
+        self.res_up_2s = _Res1D_convsizefixed_v1(36,12,3)
+
+        self.res_up_3p = _Res1D_convsizefixed_v1(24,9,5)
+        self.res_up_3s = _Res1D_convsizefixed_v1(24,9,5)
+
+        self.res_up_4p = _Res1D_convsizefixed_v1(18,6,5)
+        self.res_up_4s = _Res1D_convsizefixed_v1(18,6,5)
+
+        self.res_up_5p = _Res1D_convsizefixed_v1(12,3,5)
+        self.res_up_5s = _Res1D_convsizefixed_v1(12,3,5)        
+
+        self.res_dense_p = _Res1D_convsizefixed_v1(6,3,3)
+        self.res_dense_s = _Res1D_convsizefixed_v1(6,3,3)
+        self.res_output_p = _Res1D_convsizefixed_v1(3,1,1)
+        self.res_output_s = _Res1D_convsizefixed_v1(3,1,1)
+
+        self.upsample2 = torch.nn.Upsample(scale_factor=2, mode='linear')
+
+    def encode(self,x):
+        self.Intermediate1 = x
+        output = self.leakyRelu(self.res_down_1(x))         # 6*1600
+        output = torch.max_pool1d(output,2,2)               # 6*800
+        self.Intermediate2 = output
+        output = self.leakyRelu(self.res_down_2(output))    # 9*800
+        output = torch.max_pool1d(output,2,2)               # 9*400
+        self.Intermediate3 = output
+        output = self.leakyRelu(self.res_down_3(output))    # 12*400
+        output = torch.max_pool1d(output,2,2)               # 12*200
+        self.Intermediate4 = output
+        output = self.leakyRelu(self.res_down_4(output))    # 18*200
+        output = torch.max_pool1d(output,2,2)               # 18*100
+        self.Intermediate5 = output
+        output = self.leakyRelu(self.res_down_5(output))    # 24*100
+        output = torch.max_pool1d(output,2,2)               # 24*50
+        self.Intermediate6 = output
+        return output
+
+    def decode_p(self,x):
+        output = self.leakyRelu(self.res_up_1p(torch.cat((self.Intermediate6,x),1)))
+        output = self.upsample2(output)
+        output = self.leakyRelu(self.res_up_2p(torch.cat((self.Intermediate5,output),1)))
+        output = self.upsample2(output)
+        output = self.leakyRelu(self.res_up_3p(torch.cat((self.Intermediate4,output),1)))
+        output = self.upsample2(output)
+        output = self.leakyRelu(self.res_up_4p(torch.cat((self.Intermediate3,output),1)))
+        output = self.upsample2(output)
+        output = self.leakyRelu(self.res_up_5p(torch.cat((self.Intermediate2,output),1)))
+        output = self.upsample2(output)
+        output = self.leakyRelu(self.res_dense_p(torch.cat((self.Intermediate1,output),1)))              
+        output = torch.sigmoid(self.res_output_p(output))
+        return output
+
+    def decode_s(self,x):
+        output = self.leakyRelu(self.res_up_1s(torch.cat((self.Intermediate6,x),1)))
+        output = self.upsample2(output)
+        output = self.leakyRelu(self.res_up_2s(torch.cat((self.Intermediate5,output),1)))
+        output = self.upsample2(output)
+        output = self.leakyRelu(self.res_up_3s(torch.cat((self.Intermediate4,output),1)))
+        output = self.upsample2(output)
+        output = self.leakyRelu(self.res_up_4s(torch.cat((self.Intermediate3,output),1)))
+        output = self.upsample2(output)
+        output = self.leakyRelu(self.res_up_5s(torch.cat((self.Intermediate2,output),1)))
+        output = self.upsample2(output)
+        output = self.leakyRelu(self.res_dense_s(torch.cat((self.Intermediate1,output),1)))              
+        output = torch.sigmoid(self.res_output_s(output))
+        return output
+
+    def forward(self,x):
+        vec = self.encode(x)
+        output_p = self.decode_p(vec)
+        output_s = self.decode_s(vec)
+        output = torch.cat((output_p,output_s),1)
+        return output
+
+
 
 class _QuakePicker_v4(nn.Module):
     def __init__(self):
