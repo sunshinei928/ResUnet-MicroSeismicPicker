@@ -61,7 +61,7 @@ def init_dataset():
     print(f'total events in csv file: {len(df)}')
     # filterering the dataframe
     #df = df[(df.trace_category == configs.trace_category) & (df.source_magnitude < configs.source_magnitude_lt) & (df.p_arrival_sample > 400) & (list(map(snr_convert,df['snr_db'])))]
-    df = df[(df.trace_category == configs.trace_category) & (df.source_magnitude < configs.source_magnitude_lt) & (df.p_arrival_sample > 400) & (df.s_arrival_sample - df.p_arrival_sample < 1000)]
+    df = df[(df.trace_category == configs.trace_category) & (df.source_magnitude < configs.source_magnitude_lt) & (df.p_arrival_sample > 400) & (df.s_arrival_sample - df.p_arrival_sample < 1000) & (df.p_status == 'manual') & (df.s_status == 'manual')]
     print(f'total events selected: {len(df)}')
 
     ev_list = df['trace_name'].to_list()
@@ -95,7 +95,7 @@ class STEAD_Dataset(Dataset):
 
     def __getitem__(self,index):
         dataset = dtfl.get('data/'+str(self.ev_list[index]))
-        #   随机截取30秒数据
+        #   随机截取16秒数据
         random_start = random.randint(9,int(dataset.attrs['p_arrival_sample']))
         p_start = int(dataset.attrs['p_arrival_sample']) - random_start
         s_start = int(dataset.attrs['s_arrival_sample']) - random_start
@@ -103,9 +103,15 @@ class STEAD_Dataset(Dataset):
         coda_end = 0    #not needed
         stream = make_stream(random_start,random_start+1600,dataset)
         stream = torch.Tensor(stream)
-        stream[0] = stream[0] / (stream[0].max() - stream[0].min() + 0.000001)
-        stream[1] = stream[1] / (stream[1].max() - stream[1].min() + 0.000001)
-        stream[2] = stream[2] / (stream[2].max() - stream[2].min() + 0.000001)
+        # stream[0] = stream[0] / (stream[0].max() - stream[0].min() + 0.000001)
+        # stream[1] = stream[1] / (stream[1].max() - stream[1].min() + 0.000001)
+        # stream[2] = stream[2] / (stream[2].max() - stream[2].min() + 0.000001)
+        mean = torch.mean(stream, dim=1)
+        std = torch.std(stream, dim=1)
+        stream[0] = (stream[0]-mean[0])/(std[0]+0.000001)
+        stream[1] = (stream[1]-mean[1])/(std[1]+0.000001)
+        stream[2] = (stream[2]-mean[2])/(std[2]+0.000001)
+
         label_p = self.GaussianLabel(1600,p_start)
         label_s = self.GaussianLabel(1600,s_start)
         return stream,label_p,label_s,p_start,s_start,coda_end

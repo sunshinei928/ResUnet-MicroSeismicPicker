@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import torch
 import numpy as np
 import pandas as pd
-from codes.model import ResUnet_LSTM, ResUnet_LSTM_L
+from codes.model import ResUnet, ResUnet_LSTM_L
 from pandas.core.indexes.base import Index
 from codes import configs
 from copy import deepcopy
@@ -294,11 +294,12 @@ def showWave(Title,wave):
 
 
 #   可视化原始波形和标签
-def showRawWave(wave,p_start,s_start,coda_end):
+def showRawWave(wave,p_start,s_start,coda_end,save_path = None):
     fig = plt.figure()
 
     fig_E = fig.add_subplot(311)
     plt.title("E")
+    plt.axis([0,1600,-10,10])
     plt.plot(wave[0],color='#336699')
     plt.rcParams["figure.figsize"] = (15, 10)
     ymin, ymax = fig_E.get_ylim()
@@ -309,6 +310,7 @@ def showRawWave(wave,p_start,s_start,coda_end):
 
     fig_N = fig.add_subplot(312)
     plt.title("N")
+    plt.axis([0,1600,-10,10])
     plt.plot(wave[1],color='#336699')
     plt.rcParams["figure.figsize"] = (15, 10)
     ymin, ymax = fig_N.get_ylim()
@@ -319,6 +321,7 @@ def showRawWave(wave,p_start,s_start,coda_end):
 
     fig_Z = fig.add_subplot(313)
     plt.title("Z")
+    plt.axis([0,1600,-10,10])
     plt.plot(wave[2],color='#336699')
     plt.rcParams["figure.figsize"] = (15, 10)
     ymin, ymax = fig_Z.get_ylim()
@@ -327,13 +330,16 @@ def showRawWave(wave,p_start,s_start,coda_end):
     el = plt.vlines(coda_end,ymin,ymax,color='#663300', linewidth=2, label='coda_end')
     plt.legend(handles=[pl, sl, el], loc = 'upper right', borderaxespad=0., prop={'weight':'bold'})#在轴上放置图例  
 
+    if (save_path != None):
+        plt.savefig(save_path)
     plt.show()
 
-def showProb(wave,p_start,s_start,coda_end):
+def showProb(wave,p_start,s_start,coda_end,save_path = None):
     fig = plt.figure()
 
     fig_E = fig.add_subplot(311)
-    plt.title("E")
+    plt.title("P_prob")
+    plt.axis([0,1600,0,1])
     plt.plot(wave[0],color='#336699')
     plt.rcParams["figure.figsize"] = (15, 10)
     ymin, ymax = fig_E.get_ylim()
@@ -343,7 +349,8 @@ def showProb(wave,p_start,s_start,coda_end):
     plt.legend(handles=[pl, sl, el], loc = 'upper right', borderaxespad=0., prop={'weight':'bold'})#在轴上放置图例  
 
     fig_N = fig.add_subplot(312)
-    plt.title("N")
+    plt.title("S_prob")
+    plt.axis([0,1600,0,1])
     plt.plot(wave[1],color='#336699')
     plt.rcParams["figure.figsize"] = (15, 10)
     ymin, ymax = fig_N.get_ylim()
@@ -351,7 +358,8 @@ def showProb(wave,p_start,s_start,coda_end):
     sl = plt.vlines(s_start,ymin,ymax,color='#993399', linewidth=2, label='S-arrival')
     el = plt.vlines(coda_end,ymin,ymax,color='#663300', linewidth=2, label='coda_end')
     plt.legend(handles=[pl, sl, el], loc = 'upper right', borderaxespad=0., prop={'weight':'bold'})#在轴上放置图例  
-
+    if (save_path != None):
+        plt.savefig(save_path)
     plt.show()
 
 #   。。。
@@ -461,8 +469,11 @@ def th_evaluator(evaluator,time_bias,queue,model_path, info):
 
 
 def evaluate(model_path, info, eval_loader, time_bias, th_num):
+    if configs.model_type == 'ResUnet_BiLSTM':
+        model = ResUnet_LSTM_L(False).to(configs.device)# 带lstm的版本
+    if configs.model_type == 'ResUnet':
+        model = ResUnet().to(configs.device)
     q = Queue(th_num + 1)
-    model = ResUnet_LSTM_L(False)
     model.load_state_dict(torch.load(model_path))
     model.eval().to(configs.device)
 
